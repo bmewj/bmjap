@@ -1,0 +1,6 @@
+[submodule "lib/ddui"]
+	path = lib/ddui
+	url = https://github.com/bartjoyce/ddui
+[submodule "lib/libsoundio"]
+	path = lib/libsoundio
+	url = https://github.com/andrewrk/libsoundio
