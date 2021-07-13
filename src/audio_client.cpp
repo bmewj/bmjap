@@ -166,7 +166,7 @@ static void write_callback(SoundIoOutStream *outstream, int frame_count_min, int
         // Prepare the buffers for the app_read_callback
         Area app_buffer_areas[num_channels];
 
-        if (instream->format == SoundIoFormatFloat32NE) {
+        if (outstream->format == SoundIoFormatFloat32NE) {
             // No conversion is necessary, give the areas directly to the app
             for (int i = 0; i < num_channels; ++i) {
                 app_buffer_areas[i] = Area((float*)areas[i].ptr, frame_count, areas[i].step / sizeof(float));
@@ -229,6 +229,10 @@ static void underflow_callback(SoundIoOutStream *outstream) {
     fprintf(stderr, "underflow %d\n", count++);
 }
 
+static void error_callback(SoundIoInStream* instream, int errcode) {
+    fprintf(stderr, "error %d\n", errcode);
+}
+
 int init_audio_client(int sample_rate, ReadCallback read_callback_, WriteCallback write_callback_) {
     app_read_callback = std::move(read_callback_);
     app_write_callback = std::move(write_callback_);
@@ -252,72 +256,6 @@ int init_audio_client(int sample_rate, ReadCallback read_callback_, WriteCallbac
     fprintf(stderr, "Backend: %s\n", soundio_backend_name(soundio->current_backend));
 
     soundio_flush_events(soundio);
-
-    // Setup the input device
-    {
-        int device_index = soundio_default_input_device_index(soundio);
-        if (device_index < 0) {
-            fprintf(stderr, "Input device not found\n");
-            return 1;
-        }
-        SoundIoDevice* device = soundio_get_input_device(soundio, device_index);
-        if (!device) {
-            fprintf(stderr, "out of memory\n");
-            return 1;
-        }
-
-        fprintf(stderr, "Input device: %s\n", device->name);
-
-        if (device->probe_error) {
-            fprintf(stderr, "Cannot probe device: %s\n", soundio_strerror(device->probe_error));
-            return 1;
-        }
-
-        instream = soundio_instream_create(device);
-        if (!instream) {
-            fprintf(stderr, "out of memory\n");
-            return 1;
-        }
-
-        instream->read_callback = read_callback;
-        instream->overflow_callback = overflow_callback;
-        instream->name = stream_name;
-        instream->software_latency = latency;
-        instream->sample_rate = sample_rate;
-
-        if (soundio_device_supports_format(device, SoundIoFormatFloat32NE)) {
-            instream->format = SoundIoFormatFloat32NE;
-            read_sample = read_sample_float32ne;
-        } else if (soundio_device_supports_format(device, SoundIoFormatFloat64NE)) {
-            instream->format = SoundIoFormatFloat64NE;
-            read_sample = read_sample_float64ne;
-        } else if (soundio_device_supports_format(device, SoundIoFormatS32NE)) {
-            instream->format = SoundIoFormatS32NE;
-            read_sample = read_sample_s32ne;
-        } else if (soundio_device_supports_format(device, SoundIoFormatS16NE)) {
-            instream->format = SoundIoFormatS16NE;
-            read_sample = read_sample_s16ne;
-        } else {
-            fprintf(stderr, "No suitable device format available.\n");
-            return 1;
-        }
-
-        if ((err = soundio_instream_open(instream))) {
-            fprintf(stderr, "unable to open device: %s", soundio_strerror(err));
-        }
-
-        fprintf(stderr, "Input software latency: %f\n", instream->software_latency);
-
-        if (instream->layout_error) {
-            fprintf(stderr, "unable to set channel layout: %s\n", soundio_strerror(instream->layout_error));
-        }
-
-        if ((err = soundio_instream_start(instream))) {
-            fprintf(stderr, "unable to start device: %s\n", soundio_strerror(err));
-        }
-
-        indevice = device;
-    }
 
     // Setup the output device
     {

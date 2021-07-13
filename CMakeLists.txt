@@ -27,6 +27,7 @@ list(APPEND ASSETS
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/rhodes.ogg
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/klopfgeist_bar.ogg
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/klopfgeist_beat.ogg
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/C3.ogg
 )
 
 if(APPLE)
