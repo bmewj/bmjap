@@ -141,16 +141,15 @@ void update() {
 
     // Draw sum slice
     {
-        static int previous_offset = -1;
-        if (previous_offset == -1) {
+        static bool did_init = false;
+        static int previous_offset = 0;
+        if (!did_init) {
             Area ptr = sum_slice;
             while (ptr < ptr.end) {
                 *ptr++ = 0.0;
             }
         }
-        if (previous_offset != offset) {
-            if (previous_offset == -1) previous_offset = 0;
-
+        if (!did_init || previous_offset != offset) {
             Area ptr_offset = offset_slice + (offset > 0 ? offset : 0);
             float max = 0.0;
             for (; ptr_offset < ptr_offset.end; ++ptr_offset) {
@@ -158,7 +157,7 @@ void update() {
                     max = *ptr_offset;
                 }
             }
-            
+
             auto offset_min = offset < previous_offset ? offset : previous_offset;
             auto offset_max = offset > previous_offset ? offset : previous_offset;
             Area ptr_out = sum_slice + offset_min;
@@ -170,6 +169,7 @@ void update() {
             previous_offset = offset;
             create_peak_image(img_4, sum_slice, ddui::rgb(0x009900));
         }
+        did_init = true;
 
         ddui::save();
         ddui::translate(0, 400);
@@ -283,7 +283,8 @@ void create_peak_image(Image img, Area area, ddui::Color color) {
     unsigned char fg_bytes[4];
     unsigned char bg_bytes[4];
     color_to_bytes(color, fg_bytes);
-    color_to_bytes(ddui::rgb(0xffffff), bg_bytes);
+    color_to_bytes(color, bg_bytes);
+    bg_bytes[3] = 0x00; // transparent
 
     auto width = img.width;
     auto height = img.height;
@@ -301,6 +302,7 @@ void create_peak_image(Image img, Area area, ddui::Color color) {
 
     // Fill foreground
     auto ptr = area;
+    float last_sample = *ptr;
     for (auto x = 0; x < width; ++x) {
 
         // Get the value
@@ -311,18 +313,15 @@ void create_peak_image(Image img, Area area, ddui::Color color) {
             if (ptr_end > ptr.end) {
                 ptr_end = ptr.end;
             }
-            float min_value = 0.0;
-            float max_value = 0.0;
-            if (ptr < ptr.end) {
-                min_value = *ptr;
-                max_value = *ptr;
-            }
+            float min_value = last_sample;
+            float max_value = last_sample;
             for (; ptr < ptr_end; ++ptr) {
-                if (min_value > *ptr) {
-                    min_value = *ptr;
+                last_sample = *ptr;
+                if (min_value > last_sample) {
+                    min_value = last_sample;
                 }
-                if (max_value < *ptr) {
-                    max_value = *ptr;
+                if (max_value < last_sample) {
+                    max_value = last_sample;
                 }
             }
             y0 = height * (1.0 - (max_value + 1.0) * 0.5);
