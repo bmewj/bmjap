@@ -79,4 +79,5 @@ target_link_libraries(BMJAP
     ddui
     libsoundio_static
     ${LIBSOUNDIO_LIBS}
+    "/usr/local/lib/libfftw3.a"
 )
