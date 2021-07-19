@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8)
-set(CMAKE_OSX_DEPLOYMENT_TARGET "10.10" CACHE STRING "Minimum OS X deployment version")
+set(CMAKE_OSX_DEPLOYMENT_TARGET "10.14" CACHE STRING "Minimum OS X deployment version")
 project(BMJAP)
 
 set(CMAKE_CXX_STANDARD 14)
@@ -49,7 +49,7 @@ if(APPLE)
 
     set_target_properties(BMJAP PROPERTIES
         MACOSX_BUNDLE_ICON_FILE icon.icns
-        MACOSX_BUNDLE_INFO_PLIST ${ddui_MACOSX_BUNDLE}
+        MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/assets/MacOSXBundleInfo.plist.in
         RESOURCE ${ICON}
     )
 
