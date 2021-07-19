@@ -3,9 +3,11 @@
 #include <ddui/util/get_asset_filename>
 #include <fftw3/fftw3.h>
 #include <cmath>
+#include <atomic>
 
 #include "stb_vorbis.c"
 #include "audio_client.hpp"
+#include "fft.hpp"
 
 static Area file_left_channel;
 //static Area file_right_channel;
@@ -31,16 +33,19 @@ Image create_image(int width, int height) {
     return img;
 }
 
-static Image img_1;
-static Image img_2;
 static Image img_3;
 static Image img_4;
 static Image img_5;
-static Area slice;
+
+static Area slice_in_0;
+static Area slice_in_1;
+static Area slice_write_ptr;
+static std::atomic_int slice_count(0);
+
+
 static Area offset_slice;
 static Area sum_slice;
 static Area another_slice;
-static int offset = 0;
 static void create_peak_image(Image img, Area area, ddui::Color color);
 
 constexpr double WINDOW_TIME = 0.025;
@@ -48,126 +53,37 @@ constexpr int SAMPLE_RATE = 44100;
 constexpr int WINDOW_LENGTH = WINDOW_TIME * SAMPLE_RATE;
 
 void update() {
+    
+    auto ANIMATION_ID = (void*)0xF0;
+    if (!ddui::animation::is_animating(ANIMATION_ID)) {
+        ddui::animation::start(ANIMATION_ID);
+    }
 
     static bool img_generated = false;
     if (!img_generated) {
         img_generated = true;
 
-        slice = file_left_channel + 1000;
-        slice.end = slice.ptr + WINDOW_LENGTH * slice.step;
-        img_1 = create_image(ddui::view.width, 100);
-        img_2 = create_image(ddui::view.width, 100);
         img_3 = create_image(ddui::view.width, 200);
         img_4 = create_image(ddui::view.width, 200);
         img_5 = create_image(ddui::view.width, 200);
-        create_peak_image(img_1, slice, ddui::rgb(0xff0000));
-        create_peak_image(img_2, slice, ddui::rgb(0x0000ff));
         
         offset_slice = Area(new float[WINDOW_LENGTH], WINDOW_LENGTH, 1);
         sum_slice = Area(new float[WINDOW_LENGTH], WINDOW_LENGTH, 1);
     }
 
-    // Draw first (fixed) waveform
-    {
-        auto paint = ddui::image_pattern(0, 0, img_1.width, img_1.height, 0.0f, img_1.image_id, 1.0f);
-        ddui::begin_path();
-        ddui::rect(0, 0, img_1.width, img_1.height);
-        ddui::fill_paint(paint);
-        ddui::fill();
-    }
-    
-    // Draw second (movable) waveform
-    {
-        static bool is_dragging = false;
-        static int start_offset;
-        ddui::save();
-        ddui::translate(0, 100);
-        
-        if (!ddui::mouse_state.accepted && is_dragging) {
-            is_dragging = false;
-            playback_1 = file_left_channel;
-            playback_2 = file_left_channel + (offset >= 0 ? offset : -offset);
-        } else if (is_dragging) {
-            ddui::set_cursor(ddui::CURSOR_CLOSED_HAND);
-            offset = start_offset + (ddui::mouse_state.x - ddui::mouse_state.initial_x) * (WINDOW_LENGTH / (double)ddui::view.width);
-        } else if (ddui::mouse_hit(0, 0, img_2.width, img_2.height)) {
-            is_dragging = true;
-            start_offset = offset;
-            ddui::mouse_hit_accept();
-            ddui::set_cursor(ddui::CURSOR_CLOSED_HAND);
-        } else if (ddui::mouse_over(0, 0, img_2.width, img_2.height)) {
-            ddui::set_cursor(ddui::CURSOR_OPEN_HAND);
-        }
-        
-        auto x = offset * (ddui::view.width / (double)WINDOW_LENGTH);
-        ddui::translate(x, 0);
-
-        auto paint = ddui::image_pattern(0, 0, img_2.width, img_2.height, 0.0f, img_2.image_id, 1.0f);
-        ddui::begin_path();
-        ddui::rect(0, 0, img_1.width, img_1.height);
-        ddui::fill_paint(paint);
-        ddui::fill();
-        ddui::restore();
-    }
-
     // Draw offset slice
     {
         static bool did_init = false;
-        static int previous_offset = 0;
-        if (!did_init) {
-            Area ptr = sum_slice;
-            while (ptr < ptr.end) {
-                *ptr++ = 0.0;
-            }
+        static int previous_count = 0;
+        auto count = slice_count.load();
+        if (!did_init || previous_count != count) {
+            previous_count = count;
+            did_init = true;
+            create_peak_image(img_3, (count & 1) == 0 ? slice_in_1 : slice_in_0, ddui::rgb(0x009900));
         }
-        if (!did_init || previous_offset != offset) {
-
-            // Compute auto correlation at offset "offset"
-            {
-                Area ptr_in_1 = slice;
-                Area ptr_in_2 = slice;
-                Area ptr_out = offset_slice;
-                if (offset >= 0) {
-                    ptr_in_1 += offset;
-                    ptr_out += offset;
-                } else {
-                    ptr_in_2 += -offset;
-                }
-
-                while (ptr_in_1 < ptr_in_1.end && ptr_out < ptr_out.end && ptr_in_2 < ptr_in_2.end) {
-                    *ptr_out++ = *ptr_in_1++ * *ptr_in_2++;
-                }
-            }
-
-            // Sum it all up
-            {
-                Area ptr_offset = offset_slice + (offset > 0 ? offset : 0);
-                double sum = 0.0;
-                static double sum_all_squared = 0.0;
-                for (; ptr_offset < ptr_offset.end; ++ptr_offset) {
-                    sum += *ptr_offset;
-                }
-
-                if (offset == 0) {
-                    sum_all_squared = sum;
-                }
-                
-                auto offset_min = offset < previous_offset ? offset : previous_offset;
-                auto offset_max = offset > previous_offset ? offset : previous_offset;
-                Area ptr_out = sum_slice + offset_min;
-                Area ptr_out_end = sum_slice + offset_max;
-                while (ptr_out < ptr_out.end && ptr_out < ptr_out_end.ptr) {
-                    *ptr_out++ = sum / sum_all_squared;
-                }
-            }
-            
-            previous_offset = offset;
-            create_peak_image(img_3, sum_slice, ddui::rgb(0x009900));
-        }
-        did_init = true;
 
         ddui::save();
-        ddui::translate(0, 200);
+        ddui::translate(0, 0);
 
         auto paint = ddui::image_pattern(0, 0, img_3.width, img_3.height, 0.0f, img_3.image_id, 1.0f);
         ddui::begin_path();
@@ -180,13 +96,18 @@ void update() {
     // Draw another slice
     {
         static bool did_init = false;
-        if (!did_init) {
+        static int previous_count = 0;
+        static char message[32];
+        auto count = slice_count.load();
+        if (!did_init || previous_count != count) {
+            previous_count = count;
             did_init = true;
-            create_peak_image(img_5, another_slice, ddui::rgb(0xff0000));
+            fft_compute((count & 1) == 0 ? slice_in_1 : slice_in_0, offset_slice, message);
+            create_peak_image(img_5, offset_slice, ddui::rgb(0xff0000));
         }
 
         ddui::save();
-        ddui::translate(0, 400);
+        ddui::translate(0, 200);
 
         auto paint = ddui::image_pattern(0, 0, img_5.width, img_5.height, 0.0f, img_5.image_id, 1.0f);
         ddui::begin_path();
@@ -194,11 +115,33 @@ void update() {
         ddui::fill_paint(paint);
         ddui::fill();
         ddui::restore();
+        
+        ddui::font_face("regular");
+        ddui::font_size(26.0);
+        ddui::fill_color(ddui::rgb(0x000000));
+        ddui::text(10, 450, message, NULL);
     }
 }
 
 void read_callback(int num_samples, int num_areas, Area* areas) {
+    
+    auto& ptr_in  = areas[0];
+    auto& ptr_out = slice_write_ptr;
+    
+    while (ptr_out < ptr_out.end && ptr_in < ptr_in.end) {
+        *ptr_out++ = *ptr_in++;
+    }
 
+    if (ptr_out >= ptr_out.end) {
+        // If we filled in all of the slice we want to swap slices
+        // and continue writing to the other slice.
+        auto next_slice = (slice_count += 1) & 1;
+        ptr_out = next_slice == 0 ? slice_in_0 : slice_in_1;
+
+        while (ptr_out < ptr_out.end && ptr_in < ptr_in.end) {
+            *ptr_out++ = *ptr_in++;
+        }
+    }
 }
 
 void write_callback(int num_samples, int num_areas, Area* areas) {
@@ -284,11 +227,15 @@ int main(int argc, const char** argv) {
     playback_1 = file_left_channel;
     playback_2 = file_left_channel;
     
-    do_fft();
+    slice_in_0 = Area(new float[WINDOW_LENGTH], WINDOW_LENGTH, 1);
+    slice_in_1 = Area(new float[WINDOW_LENGTH], WINDOW_LENGTH, 1);
 
+    fft_init(WINDOW_LENGTH);
     init_audio_client(sample_rate, read_callback, write_callback);
 
     ddui::app_run();
+
+    fft_destroy();
 
     return 0;
 }
