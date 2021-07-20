@@ -2,13 +2,14 @@
 #define RingBuffer_hpp
 
 #include <memory>
+#include <atomic>
 #include "Area.hpp"
 
 struct RingBuffer {
     std::unique_ptr<float[]> buffer;
     int buffer_size;
-    int read_point;
-    int write_point;
+    std::atomic_int read_point;
+    std::atomic_int write_point;
 
     // Constructor
     RingBuffer(int buffer_size);
@@ -31,17 +32,19 @@ inline RingBuffer::RingBuffer(int buffer_size_) {
 }
 
 inline bool RingBuffer::can_read(int num_samples) const {
+    int read_point_copy  = read_point;
     int write_point_copy = write_point;
-    if (read_point <= write_point_copy) {
-        return (read_point + num_samples <= write_point_copy);
+    if (read_point_copy <= write_point_copy) {
+        return (read_point_copy + num_samples <= write_point_copy);
     } else {
         return (num_samples <= write_point_copy);
     }
 }
 
 inline Area RingBuffer::start_read(int num_samples) const {
-    if (read_point + num_samples <= buffer_size) {
-        return Area(&buffer[0] + read_point, num_samples, 1);
+    int read_point_copy = read_point;
+    if (read_point_copy + num_samples <= buffer_size) {
+        return Area(&buffer[0] + read_point_copy, num_samples, 1);
     } else {
         return Area(&buffer[0], num_samples, 1);
     }
@@ -56,8 +59,9 @@ inline void RingBuffer::end_read(int num_samples) {
 }
 
 inline Area RingBuffer::start_write(int num_samples) const {
-    if (write_point + num_samples <= buffer_size) {
-        return Area(&buffer[0] + write_point, num_samples, 1);
+    int write_point_copy = write_point;
+    if (write_point_copy + num_samples <= buffer_size) {
+        return Area(&buffer[0] + write_point_copy, num_samples, 1);
     } else {
         return Area(&buffer[0], num_samples, 1);
     }

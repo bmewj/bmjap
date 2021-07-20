@@ -7,6 +7,7 @@
 #include "audio_client.hpp"
 #include "fft.hpp"
 #include "peak_image.hpp"
+#include "data_types/RingBuffer.hpp"
 
 static Image img_1;
 static Image img_2;
@@ -16,6 +17,8 @@ static Area slice_in_0;
 static Area slice_in_1;
 static Area slice_write_ptr;
 static std::atomic_int slice_count(0);
+
+static RingBuffer ring_buffer(4096);
 
 static Area ac_slice;
 
@@ -114,22 +117,35 @@ void update() {
 
 void read_callback(int num_samples, int num_areas, Area* areas) {
     
-    auto& ptr_in  = areas[0];
-    auto& ptr_out = slice_write_ptr;
-    
-    while (ptr_out < ptr_out.end && ptr_in < ptr_in.end) {
-        *ptr_out++ = *ptr_in++;
-    }
-
-    if (ptr_out >= ptr_out.end) {
-        // If we filled in all of the slice we want to swap slices
-        // and continue writing to the other slice.
-        auto next_slice = (slice_count += 1) & 1;
-        ptr_out = next_slice == 0 ? slice_in_0 : slice_in_1;
-
+    // ... write input into slice for visualisation and FFT
+    {
+        auto  ptr_in  = areas[0];
+        auto& ptr_out = slice_write_ptr;
+        
         while (ptr_out < ptr_out.end && ptr_in < ptr_in.end) {
             *ptr_out++ = *ptr_in++;
         }
+
+        if (ptr_out >= ptr_out.end) {
+            // If we filled in all of the slice we want to swap slices
+            // and continue writing to the other slice.
+            auto next_slice = (slice_count += 1) & 1;
+            ptr_out = next_slice == 0 ? slice_in_0 : slice_in_1;
+
+            while (ptr_out < ptr_out.end && ptr_in < ptr_in.end) {
+                *ptr_out++ = *ptr_in++;
+            }
+        }
+    }
+
+    // ... write input into RingBuffer for software monitoring
+    {
+        auto ptr_in  = areas[0];
+        auto ptr_out = ring_buffer.start_write(num_samples);
+        while (ptr_in < ptr_in.end) {
+            *ptr_out++ = *ptr_in++;
+        }
+        ring_buffer.end_write(num_samples);
     }
 }
 
@@ -152,6 +168,17 @@ void write_callback(int num_samples, int num_areas, Area* areas) {
         while (area < area.end) {
             *area++ = 0.0;
         }
+    }
+
+    if (ring_buffer.can_read(num_samples)) {
+        auto ptr_in = ring_buffer.start_read(num_samples);
+        auto ptr_out_l = areas[0];
+        auto ptr_out_r = areas[1];
+        while (ptr_in < ptr_in.end) {
+            *ptr_out_l++ = *ptr_in;
+            *ptr_out_r++ = *ptr_in++;
+        }
+        ring_buffer.end_read(num_samples);
     }
 //
 //    auto& in_1 = playback_1;

@@ -6,13 +6,9 @@ set(CMAKE_CXX_STANDARD 14)
 
 set(BMJAP_VERSION 1.0.0)
 
-# libsoundio options
-set(BUILD_EXAMPLE_PROGRAMS OFF CACHE BOOL "Build example programs")
-set(BUILD_TESTS OFF CACHE BOOL "Build tests")
-
 add_subdirectory(src)
 add_subdirectory(lib/ddui)
-add_subdirectory(lib/libsoundio)
+add_subdirectory(lib/portaudio ${CMAKE_CURRENT_BINARY_DIR}/portaudio EXCLUDE_FROM_ALL)
 
 list(APPEND ASSETS
     ${ddui_ASSETS}
@@ -70,14 +66,11 @@ endif()
 
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/lib/
-    ${CMAKE_CURRENT_SOURCE_DIR}/lib/libsoundio/
+    ${CMAKE_CURRENT_SOURCE_DIR}/lib/portaudio/include/
 )
-
-get_directory_property(LIBSOUNDIO_LIBS DIRECTORY lib/libsoundio DEFINITION LIBSOUNDIO_LIBS)
 
 target_link_libraries(BMJAP
     ddui
-    libsoundio_static
-    ${LIBSOUNDIO_LIBS}
+    portaudio_static
     "/usr/local/lib/libfftw3.a"
 )
