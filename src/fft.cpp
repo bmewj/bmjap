@@ -5,8 +5,8 @@
 
 static int window_length;
 static int N;
-static fftw_complex* buf_in;
-static fftw_complex* buf_out;
+static fftw_complex* buf_A;
+static fftw_complex* buf_B;
 static fftw_plan plan_1;
 static fftw_plan plan_2;
 
@@ -14,21 +14,36 @@ void fft_init(int window_length) {
     window_length = window_length;
     N = (int)exp2(ceil(log2(window_length)));
 
-    buf_in = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * N);
-    buf_out = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * N);
-    plan_1 = fftw_plan_dft_1d(N, buf_in, buf_out, FFTW_FORWARD, FFTW_MEASURE);
-    plan_2 = fftw_plan_dft_1d(N, buf_out, buf_in, FFTW_BACKWARD, FFTW_MEASURE);
+    buf_A = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * N);
+    buf_B = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * N);
+    plan_1 = fftw_plan_dft_1d(N, buf_A, buf_B, FFTW_FORWARD,  FFTW_MEASURE);
+    plan_2 = fftw_plan_dft_1d(N, buf_B, buf_A, FFTW_BACKWARD, FFTW_MEASURE);
 }
 
-void fft_compute(Area in, Area out, char* message) {
+void fft_compute(Area in, Area out, FFTResult* result) {
+
+    // ... determine input scalar
+    double scalar = 1.0;
+    {
+        auto ptr = in;
+        auto max = *ptr;
+        for (; ptr < ptr.end; ++ptr) {
+            if (max < *ptr) {
+                max = *ptr;
+            }
+        }
+        if (max != 0.0) {
+            scalar = 1.0 / (double)max;
+        }
+    }
 
     // ... fill in with data
     {
-        auto ptr     = buf_in;
-        auto ptr_end = buf_in + N;
+        auto ptr     = buf_A;
+        auto ptr_end = buf_A + N;
         // Copy the window into our double array
         while (in < in.end) {
-            (*ptr)[0] = *in++;
+            (*ptr)[0] = *in++ * scalar;
             (*ptr)[1] = 0.0;
             ptr++;
         }
@@ -45,8 +60,8 @@ void fft_compute(Area in, Area out, char* message) {
 
     // ... square the output
     {
-        auto ptr     = buf_out;
-        auto ptr_end = buf_out + N;
+        auto ptr     = buf_B;
+        auto ptr_end = buf_B + N;
         auto scalar = 1.0 / std::sqrt((double)N);
         for (; ptr < ptr_end; ++ptr) {
             auto real = (*ptr)[0] * scalar;
@@ -61,9 +76,9 @@ void fft_compute(Area in, Area out, char* message) {
 
     // ... write output
     {
-        auto ptr_in = buf_in;
+        auto ptr_in = buf_A;
         auto ptr_out = out;
-        auto scalar = 1.0 / buf_in[0][0]; // the first sample is the max
+        auto scalar = 1.0 / buf_A[0][0]; // the first sample is the max
         while (ptr_out < ptr_out.end) {
             *ptr_out++ = (*ptr_in++)[0] * scalar;
         }
@@ -78,12 +93,14 @@ void fft_compute(Area in, Area out, char* message) {
 
         // Find max value
         int max_i = 0;
-        for (auto max = *ptr; ptr < ptr.end; ++ptr) {
+        auto max = *ptr;
+        for (; ptr < ptr.end; ++ptr) {
             if (max < *ptr) {
                 max = *ptr;
                 max_i = ptr.ptr - out.ptr;
             }
         }
+
 
         constexpr double SAMPLE_RATE = 44100.0;
         auto frequency = SAMPLE_RATE / max_i;
@@ -96,16 +113,23 @@ void fft_compute(Area in, Area out, char* message) {
         constexpr double FREQ_A0 = 27.5;
         auto note_value = 12.0 * log(frequency / FREQ_A0) / log(2.0);
         auto note_value_fixed = (int)round(note_value);
-        auto note_value_cents = (note_value - note_value_fixed) * 100;
+        auto note_value_cents = (int)round((note_value - note_value_fixed) * 100);
         auto note_value_octave = note_value_fixed / 12;
         auto note = NOTE_NAMES[note_value_fixed % 12];
-        sprintf(message, "%fHz = %s%d + %f", frequency, note, note_value_octave, note_value_cents);
+
+        // Fill result
+        result->wave_length = max_i;
+        result->auto_correlation_peak = max;
+        result->frequency = frequency;
+        result->note_name = note;
+        result->note_octave = (char)note_value_octave;
+        result->note_cents = (char)note_value_cents;
     }
 }
 
 void fft_destroy() {
     fftw_destroy_plan(plan_1);
     fftw_destroy_plan(plan_2);
-    fftw_free(buf_in);
-    fftw_free(buf_out);
+    fftw_free(buf_A);
+    fftw_free(buf_B);
 }
