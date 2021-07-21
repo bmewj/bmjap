@@ -3,15 +3,13 @@
 #include <fftw3/fftw3.h>
 #include <cmath>
 #include <atomic>
+#include <mutex>
 
 #include "audio_client.hpp"
 #include "pitch_detect.hpp"
 #include "peak_image.hpp"
+#include "window_reader.hpp"
 #include "data_types/ring_buffer.hpp"
-
-static Image img_1;
-static Image img_2;
-static Image img_3;
 
 static PitchDetectState pd_state;
 
@@ -22,33 +20,35 @@ constexpr int WINDOW_LENGTH = WINDOW_TIME * SAMPLE_RATE;
 static RingBufferState ring_buffer;
 static RingBufferReaderState ring_buffer_reader;
 
+static std::mutex mutex;
+static int count;
+static PitchDetectResult result;
+static Image img_1;
+static Image img_2;
+static Image img_3;
+
 void update() {
-    
     auto ANIMATION_ID = (void*)0xF0;
     if (!ddui::animation::is_animating(ANIMATION_ID)) {
         ddui::animation::start(ANIMATION_ID);
     }
-    
-    Area slice_in, slice_out;
-    PitchDetectResult result;
-    int count = pitch_detect_read(&pd_state, &slice_in, &slice_out, &result);
-    if (slice_in.ptr == NULL) {
-        return;
-    }
 
-    static bool img_generated = false;
-    if (!img_generated) {
-        img_generated = true;
+    PitchDetectResult result_copy;
+    {
+        std::lock_guard<std::mutex> lg(mutex);
+        result_copy = result;
 
-        img_1 = create_image(ddui::view.width, 200);
-        img_2 = create_image(ddui::view.width, 200);
-        img_3 = create_image(ddui::view.width, 100);
+        static long previous_count = 0;
+        if (previous_count != count) {
+            previous_count = count;
+            ddui::update_image(img_1.image_id, img_1.data);
+            ddui::update_image(img_2.image_id, img_2.data);
+            ddui::update_image(img_3.image_id, img_3.data);
+        }
     }
 
     // Draw incoming waveform
     {
-        create_peak_image(img_1, slice_in, ddui::rgb(0x009900));
-
         ddui::save();
         ddui::translate(0, 0);
 
@@ -59,11 +59,9 @@ void update() {
         ddui::fill();
         ddui::restore();
     }
-    
+
     // Draw auto-correlation waveform
     {
-        create_peak_image(img_2, slice_out, ddui::rgb(0xff0000));
-        
         ddui::save();
         ddui::translate(0, 200);
 
@@ -89,9 +87,6 @@ void update() {
     
     // Draw full ring buffer contents
     {
-        auto area = Area(ring_buffer.buffer, ring_buffer.buffer_size, ring_buffer.step);
-        create_peak_image(img_3, area, ddui::Color(ddui::rgb(0x888888)));
-        
         ddui::save();
         ddui::translate(0, 400);
 
@@ -111,19 +106,19 @@ void update() {
         
         static char message_1[32];
         static char message_2[32];
-        if (result.confidence > 0.5) {
+        if (result_copy.confidence > 0.5) {
             sprintf(
                 message_1,
                 "%fHz = %s%d + %d",
-                result.frequency,
-                result.note_name,
-                (int)result.note_octave,
-                (int)result.note_cents
+                result_copy.frequency,
+                result_copy.note_name,
+                (int)result_copy.note_octave,
+                (int)result_copy.note_cents
             );
             sprintf(
                 message_2,
                 "Confidence: %f",
-                result.confidence
+                result_copy.confidence
             );
         } else {
             message_1[0] = '\0';
@@ -142,39 +137,28 @@ void update() {
     }
 }
 
-void read_callback(int num_samples, int num_areas, Area* areas) {
+void window_callback(Area area, long count_) {
+    std::lock_guard<std::mutex> lg(mutex);
 
-    // ... write input into RingBuffer for software monitoring
-    {
-        auto ptr_in  = areas[0];
-        auto ptr_out = ring_buffer_start_write(&ring_buffer, num_samples);
-        while (ptr_in < ptr_in.end) {
-            *ptr_out++ = *ptr_in++;
-        }
-        ring_buffer_end_write(&ring_buffer, num_samples);
+    Area ac_area;
+    pitch_detect_compute(&pd_state, area, &ac_area, &result);
+    render_peak_image(img_1, area, ddui::rgb(0x009900));
+    render_peak_image(img_2, ac_area, ddui::rgb(0xff0000));
+    auto rb_area = Area(ring_buffer.buffer, ring_buffer.buffer_size, ring_buffer.step);
+    render_peak_image(img_3, rb_area, ddui::Color(ddui::rgb(0x888888)));
+    count = count_;
+}
+
+void read_callback(int num_samples, int num_areas, Area* areas) {
+    auto ptr_in  = areas[0];
+    auto ptr_out = ring_buffer_start_write(&ring_buffer, num_samples);
+    while (ptr_in < ptr_in.end) {
+        *ptr_out++ = *ptr_in++;
     }
+    ring_buffer_end_write(&ring_buffer, num_samples);
 }
 
 void write_callback(int num_samples, int num_areas, Area* areas) {
-
-//    constexpr int SAMPLE_RATE = 44100;
-//    double frequency = (double)SAMPLE_RATE / max_i;
-//
-//    double time_period = SAMPLE_RATE / frequency;
-//
-//    auto out_l = areas[0];
-//    auto out_r = areas[1];
-//    static int i = 0;
-//    while (out_l < out_l.end) {
-//        *out_l++ = std::sin(2.0 * 3.14159 * i++ / time_period);
-//    }
-    
-    for (int n = 0; n < num_areas; ++n) {
-        auto area = areas[n];
-        while (area < area.end) {
-            *area++ = 0.0;
-        }
-    }
 
     if (ring_buffer_can_read(&ring_buffer, &ring_buffer_reader, num_samples)) {
         auto ptr_in = ring_buffer_read(&ring_buffer, &ring_buffer_reader, num_samples);
@@ -185,16 +169,6 @@ void write_callback(int num_samples, int num_areas, Area* areas) {
             *ptr_out_r++ = *ptr_in++;
         }
     }
-//
-//    auto& in_1 = playback_1;
-//    auto& in_2 = playback_2;
-//    auto out_l = areas[0];
-//    auto out_r = areas[1];
-//    while (in_1 < in_1.end && in_2 < in_2.end && out_l < out_l.end) {
-//        auto sample = 0.5 * *in_1++ + 0.5 * *in_2++;
-//        *out_l++ = sample;
-//        *out_r++ = sample;
-//    }
 
 }
 
@@ -212,12 +186,19 @@ int main(int argc, const char** argv) {
     ddui::create_font("bold", "SFBold.ttf");
     ddui::create_font("thin", "SFThin.ttf");
     ddui::create_font("mono", "PTMono.ttf");
+
+    img_1 = create_image(700, 200);
+    img_2 = create_image(700, 200);
+    img_3 = create_image(700, 100);
     
     ring_buffer_init(&ring_buffer, SAMPLE_RATE * 4.0);
     ring_buffer_reader_init(&ring_buffer, &ring_buffer_reader);
 
-    pitch_detect_init_state(&pd_state, &ring_buffer, WINDOW_TIME, SAMPLE_RATE);
-    pitch_detect_start(&pd_state);
+    window_reader_init(&ring_buffer, WINDOW_TIME, SAMPLE_RATE, window_callback);
+    window_reader_start();
+
+    pitch_detect_init_state(&pd_state, WINDOW_TIME, SAMPLE_RATE);
+
     init_audio_client(SAMPLE_RATE, read_callback, write_callback);
 
     ddui::app_run();

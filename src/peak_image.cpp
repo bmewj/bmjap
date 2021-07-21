@@ -12,7 +12,7 @@ Image create_image(int width, int height) {
 
 static void color_to_bytes(ddui::Color in, unsigned char* out);
 
-void create_peak_image(Image img, Area area, ddui::Color color) {
+void render_peak_image(Image img, Area area, ddui::Color color) {
 
     unsigned char fg_bytes[4];
     unsigned char bg_bytes[4];
@@ -84,8 +84,6 @@ void create_peak_image(Image img, Area area, ddui::Color color) {
             data[i+3] = fg_bytes[3];
         }
     }
-
-    ddui::update_image(img.image_id, data);
 }
 
 static void color_to_bytes(ddui::Color in, unsigned char* out) {

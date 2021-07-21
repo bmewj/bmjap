@@ -2,6 +2,7 @@
 #include <cmath>
 #include <assert.h>
 #include <time.h>
+#include <stdio.h>
 
 void ring_buffer_init(RingBufferState* rb, int buffer_size, int num_areas) {
     buffer_size = (int)exp2(ceil(log2(buffer_size)));
@@ -59,12 +60,12 @@ void ring_buffer_read(RingBufferState* rb, RingBufferReaderState* rbr, int num_s
     long write_point;
     while (true) {
         write_point = rb->write_point.load();
-        auto readible = write_point - *rbr;
-        if (readible > 0) {
+        auto available = write_point - *rbr;
+        if (available >= num_samples) {
             break;
         }
 
-        auto remaining_in_seconds = (num_samples - readible) / SAMPLE_RATE_GUESS;
+        auto remaining_in_seconds = (num_samples - available) / SAMPLE_RATE_GUESS;
         timespec ts;
         ts.tv_sec = (int)remaining_in_seconds;
         ts.tv_nsec = (long)((remaining_in_seconds - ts.tv_sec) * 1000000000.0);

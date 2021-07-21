@@ -13,6 +13,6 @@ struct Image {
 
 Image create_image(int width, int height);
 
-void create_peak_image(Image img, Area area, ddui::Color color);
+void render_peak_image(Image img, Area area, ddui::Color color);
 
 #endif

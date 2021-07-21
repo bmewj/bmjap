@@ -2,9 +2,6 @@
 #define pitch_detect_hpp
 
 #include "fft.hpp"
-#include <atomic>
-#include <pthread.h>
-#include "data_types/ring_buffer.hpp"
 
 struct PitchDetectResult {
     int wave_length;
@@ -15,32 +12,17 @@ struct PitchDetectResult {
     char note_cents;
 };
 
-constexpr int NUM_BUFFERS = 2;
-
 struct PitchDetectState {
     double window_time;
     int sample_rate;
     int window_length;
 
-    RingBufferState* ring_buffer;
-    RingBufferReaderState ring_buffer_reader;
     FFTState* fft_state;
-
-    Area windows_in[NUM_BUFFERS];
-    Area windows_out[NUM_BUFFERS];
-    PitchDetectResult results[NUM_BUFFERS];
-    std::atomic_int window_count;
-
     float* data;
-    pthread_t thread;
-    std::atomic_bool running;
 };
 
-void pitch_detect_init_state(PitchDetectState* state, RingBufferState* ring_buffer, double window_time, int sample_rate);
-void pitch_detect_start(PitchDetectState* state);
-void pitch_detect_stop(PitchDetectState* state);
+void pitch_detect_init_state(PitchDetectState* state, double window_time, int sample_rate);
+void pitch_detect_compute(PitchDetectState* state, Area window_in, Area* window_out, PitchDetectResult* result);
 void pitch_detect_destroy(PitchDetectState* state);
-
-int  pitch_detect_read(PitchDetectState* state, Area* in, Area* out, PitchDetectResult* result);
 
 #endif

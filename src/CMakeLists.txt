@@ -10,6 +10,8 @@ list(APPEND SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/fft.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/pitch_detect.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/pitch_detect.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/window_reader.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/window_reader.cpp
 )
 add_subdirectory(data_types)
 set(SOURCES ${SOURCES} PARENT_SCOPE)
