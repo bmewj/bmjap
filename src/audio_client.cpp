@@ -13,7 +13,7 @@ static WriteCallback app_write_callback;
 
 static PaStream *pa_stream;
 
-constexpr int BUFFER_SIZE = 128;
+constexpr int BUFFER_SIZE = 32;
 constexpr int SAMPLE_RATE = 44100;
 constexpr int NUM_IN_CHANNELS = 1;
 constexpr int NUM_OUT_CHANNELS = 2;
@@ -32,7 +32,7 @@ static int patestCallback(const void *inputBuffer, void *outputBuffer,
     for (int i = 0; i < NUM_IN_CHANNELS; ++i) {
         in_areas[i] = Area(in + i, framesPerBuffer, NUM_IN_CHANNELS);
     }
-    
+
     Area out_areas[NUM_OUT_CHANNELS];
     for (int i = 0; i < NUM_OUT_CHANNELS; ++i) {
         out_areas[i] = Area(out + i, framesPerBuffer, NUM_OUT_CHANNELS);

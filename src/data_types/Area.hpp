@@ -60,6 +60,10 @@ struct Area {
         return copy;
     }
 
+    int num_samples() const {
+        return (end - ptr) / step;
+    }
+
     static int copy_over(Area area_in, Area area_out) {
         float* area_in_start = area_in.ptr;
         while (area_in < area_in.end && area_out < area_out.end) {

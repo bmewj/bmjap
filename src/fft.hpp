@@ -3,17 +3,10 @@
 
 #include "data_types/Area.hpp"
 
-struct FFTResult {
-    int wave_length;
-    float auto_correlation_peak;
-    float frequency;
-    const char* note_name;
-    char note_octave;
-    char note_cents;
-};
+struct FFTState;
 
-void fft_init(int window_length);
-void fft_compute(Area in, Area out, FFTResult* result);
-void fft_destroy();
+FFTState* fft_init(int window_length);
+void fft_compute(FFTState* state, Area in, Area out);
+void fft_destroy(FFTState* state);
 
 #endif

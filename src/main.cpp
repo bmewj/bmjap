@@ -5,7 +5,7 @@
 #include <atomic>
 
 #include "audio_client.hpp"
-#include "fft.hpp"
+#include "pitch_detect.hpp"
 #include "peak_image.hpp"
 #include "data_types/RingBuffer.hpp"
 
@@ -13,18 +13,14 @@ static Image img_1;
 static Image img_2;
 static Image img_3;
 
-static Area slice_in_0;
-static Area slice_in_1;
-static Area slice_write_ptr;
-static std::atomic_int slice_count(0);
-
-static RingBuffer ring_buffer(4096);
-
-static Area ac_slice;
+static PitchDetectState pd_state;
 
 constexpr double WINDOW_TIME = 0.025;
 constexpr int SAMPLE_RATE = 44100;
 constexpr int WINDOW_LENGTH = WINDOW_TIME * SAMPLE_RATE;
+
+static RingBuffer ring_buffer;
+static RingBufferReader ring_buffer_reader;
 
 void update() {
     
@@ -32,6 +28,10 @@ void update() {
     if (!ddui::animation::is_animating(ANIMATION_ID)) {
         ddui::animation::start(ANIMATION_ID);
     }
+    
+    Area slice_in, slice_out;
+    PitchDetectResult result;
+    int count = pitch_detect_read(&pd_state, &slice_in, &slice_out, &result);
 
     static bool img_generated = false;
     if (!img_generated) {
@@ -40,19 +40,14 @@ void update() {
         img_1 = create_image(ddui::view.width, 200);
         img_2 = create_image(ddui::view.width, 200);
         img_3 = create_image(ddui::view.width, 200);
-        
-        ac_slice = Area(new float[WINDOW_LENGTH], WINDOW_LENGTH, 1);
     }
 
     // Draw offset slice
     {
-        static bool did_init = false;
-        static int previous_count = 0;
-        auto count = slice_count.load();
-        if (!did_init || previous_count != count) {
+        static int previous_count = -1;
+        if (previous_count != count && count >= 0) {
             previous_count = count;
-            did_init = true;
-            create_peak_image(img_1, (count & 1) == 0 ? slice_in_1 : slice_in_0, ddui::rgb(0x009900));
+            create_peak_image(img_1, slice_in, ddui::rgb(0x009900));
         }
 
         ddui::save();
@@ -68,24 +63,31 @@ void update() {
     
     // Draw another slice
     {
-        static bool did_init = false;
-        static int previous_count = 0;
-        static FFTResult result;
-        static char message[32];
-        auto count = slice_count.load();
-        if (!did_init || previous_count != count) {
+        static int previous_count = -1;
+        
+        static char message_1[32];
+        static char message_2[32];
+        if (previous_count != count && count >= 0) {
             previous_count = count;
-            did_init = true;
-            fft_compute((count & 1) == 0 ? slice_in_1 : slice_in_0, ac_slice, &result);
-            sprintf(
-                message,
-                "%fHz = %s%d + %d",
-                result.frequency,
-                result.note_name,
-                (int)result.note_octave,
-                (int)result.note_cents
-            );
-            create_peak_image(img_3, ac_slice, ddui::rgb(0xff0000));
+            if (result.confidence > 0.5) {
+                sprintf(
+                    message_1,
+                    "%fHz = %s%d + %d",
+                    result.frequency,
+                    result.note_name,
+                    (int)result.note_octave,
+                    (int)result.note_cents
+                );
+                sprintf(
+                    message_2,
+                    "Confidence: %f",
+                    result.confidence
+                );
+            } else {
+                message_1[0] = '\0';
+                message_2[0] = '\0';
+            }
+            create_peak_image(img_3, slice_out, ddui::rgb(0xff0000));
         }
 
         ddui::save();
@@ -97,46 +99,30 @@ void update() {
         ddui::fill_paint(paint);
         ddui::fill();
         
-        ddui::begin_path();
-        ddui::stroke_color(ddui::rgb(0x0000ff));
-        ddui::stroke_width(1.0);
-        auto x = (result.wave_length / (float)WINDOW_LENGTH) * img_3.width;
-        auto y = (- 0.5 * result.auto_correlation_peak + 0.5) * img_3.height;
-        ddui::move_to(0, y);
-        ddui::line_to(x, y);
-        ddui::stroke();
-
+        if (result.confidence > 0.5) {
+            ddui::begin_path();
+            ddui::stroke_color(ddui::rgb(0x0000ff));
+            ddui::stroke_width(1.0);
+            auto x = (result.wave_length / (float)WINDOW_LENGTH) * img_3.width;
+            auto y = (1.0 - result.confidence) * 0.5 * img_3.height;
+            ddui::move_to(0, y);
+            ddui::line_to(x, y);
+            ddui::stroke();
+        }
+            
         ddui::restore();
 
         ddui::font_face("mono");
         ddui::font_size(26.0);
         ddui::fill_color(ddui::rgb(0x000000));
-        ddui::text(10, 450, message, NULL);
+        ddui::text(10, 450, message_1, NULL);
+        float asc, desc, line_h;
+        ddui::text_metrics(&asc, &desc, &line_h);
+        ddui::text(10, 450 + line_h, message_2, NULL);
     }
 }
 
 void read_callback(int num_samples, int num_areas, Area* areas) {
-    
-    // ... write input into slice for visualisation and FFT
-    {
-        auto  ptr_in  = areas[0];
-        auto& ptr_out = slice_write_ptr;
-        
-        while (ptr_out < ptr_out.end && ptr_in < ptr_in.end) {
-            *ptr_out++ = *ptr_in++;
-        }
-
-        if (ptr_out >= ptr_out.end) {
-            // If we filled in all of the slice we want to swap slices
-            // and continue writing to the other slice.
-            auto next_slice = (slice_count += 1) & 1;
-            ptr_out = next_slice == 0 ? slice_in_0 : slice_in_1;
-
-            while (ptr_out < ptr_out.end && ptr_in < ptr_in.end) {
-                *ptr_out++ = *ptr_in++;
-            }
-        }
-    }
 
     // ... write input into RingBuffer for software monitoring
     {
@@ -170,15 +156,14 @@ void write_callback(int num_samples, int num_areas, Area* areas) {
         }
     }
 
-    if (ring_buffer.can_read(num_samples)) {
-        auto ptr_in = ring_buffer.start_read(num_samples);
+    if (ring_buffer_reader.can_read(num_samples)) {
+        auto ptr_in = ring_buffer_reader.read(num_samples);
         auto ptr_out_l = areas[0];
         auto ptr_out_r = areas[1];
         while (ptr_in < ptr_in.end) {
             *ptr_out_l++ = *ptr_in;
             *ptr_out_r++ = *ptr_in++;
         }
-        ring_buffer.end_read(num_samples);
     }
 //
 //    auto& in_1 = playback_1;
@@ -208,15 +193,16 @@ int main(int argc, const char** argv) {
     ddui::create_font("thin", "SFThin.ttf");
     ddui::create_font("mono", "PTMono.ttf");
     
-    slice_in_0 = Area(new float[WINDOW_LENGTH], WINDOW_LENGTH, 1);
-    slice_in_1 = Area(new float[WINDOW_LENGTH], WINDOW_LENGTH, 1);
+    RingBuffer::init(&ring_buffer, ((int)exp2(ceil(log2(WINDOW_LENGTH)))));
+    RingBufferReader::init(&ring_buffer_reader, &ring_buffer);
 
-    fft_init(WINDOW_LENGTH);
+    pitch_detect_init_state(&pd_state, &ring_buffer, WINDOW_TIME, SAMPLE_RATE);
+    pitch_detect_start(&pd_state);
     init_audio_client(SAMPLE_RATE, read_callback, write_callback);
 
     ddui::app_run();
 
-    fft_destroy();
+    pitch_detect_destroy(&pd_state);
 
     return 0;
 }
