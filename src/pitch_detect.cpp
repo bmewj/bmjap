@@ -6,13 +6,14 @@ static void* pitch_detect_thread(void* ptr);
 static void sleep(double seconds);
 static void compute_result(double sample_rate, Area out, PitchDetectResult* result);
 
-void pitch_detect_init_state(PitchDetectState* state, RingBuffer* ring_buffer, double window_time, int sample_rate) {
+void pitch_detect_init_state(PitchDetectState* state, RingBufferState* ring_buffer, double window_time, int sample_rate) {
 
     state->window_time = window_time;
     state->sample_rate = sample_rate;
     state->window_length = (int)(window_time * sample_rate);
 
-    RingBufferReader::init(&state->ring_buffer_reader, ring_buffer);
+    state->ring_buffer = ring_buffer;
+    ring_buffer_reader_init(ring_buffer, &state->ring_buffer_reader);
     state->fft_state = fft_init(state->window_length);
 
     // Allocate all the slices
@@ -71,7 +72,7 @@ void* pitch_detect_thread(void* ptr) {
         // Read in a new window
         auto ptr_out = state->windows_in[window_count % NUM_BUFFERS];
         while (ptr_out < ptr_out.end) {
-            auto ptr_in = state->ring_buffer_reader.read(ptr_out.num_samples());
+            auto ptr_in = ring_buffer_read(state->ring_buffer, &state->ring_buffer_reader, ptr_out.num_samples());
             while (ptr_in < ptr_in.end) {
                 *ptr_out++ = *ptr_in++;
             }

@@ -1,6 +1,6 @@
 list(APPEND SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Area.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/RingBuffer.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/StereoBuffer.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ring_buffer.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ring_buffer.cpp
 )
 set(SOURCES ${SOURCES} PARENT_SCOPE)

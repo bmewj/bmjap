@@ -4,7 +4,7 @@
 #include "fft.hpp"
 #include <atomic>
 #include <pthread.h>
-#include "data_types/RingBuffer.hpp"
+#include "data_types/ring_buffer.hpp"
 
 struct PitchDetectResult {
     int wave_length;
@@ -22,7 +22,8 @@ struct PitchDetectState {
     int sample_rate;
     int window_length;
 
-    RingBufferReader ring_buffer_reader;
+    RingBufferState* ring_buffer;
+    RingBufferReaderState ring_buffer_reader;
     FFTState* fft_state;
 
     Area windows_in[NUM_BUFFERS];
@@ -35,7 +36,7 @@ struct PitchDetectState {
     std::atomic_bool running;
 };
 
-void pitch_detect_init_state(PitchDetectState* state, RingBuffer* ring_buffer, double window_time, int sample_rate);
+void pitch_detect_init_state(PitchDetectState* state, RingBufferState* ring_buffer, double window_time, int sample_rate);
 void pitch_detect_start(PitchDetectState* state);
 void pitch_detect_stop(PitchDetectState* state);
 void pitch_detect_destroy(PitchDetectState* state);
